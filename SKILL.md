@@ -1,83 +1,84 @@
 ---
 name: herdr
-description: 使用 Herdr TUI 官方 CLI 与本地 Agent 适配入口管理工作区、标签页、窗格、Codex/Claude 消息和生命周期；提供 schema、统一 JSON、写入预演、计划校验、有界读取与错误恢复，并指导官方 worktree、SSH、插件、集成、配置恢复操作。用户明确提到 Herdr TUI 或要求通过 Herdr 操作时使用；不因一般并行任务触发。运行控制要求 HERDR_ENV=1；Herdr App/hc 不适用。
+description: 统一操作 Herdr TUI（herdr）、Core（hc）与桌面 App（herdr-app）：管理持久终端和 Agent、工作区/空间/标签页/窗格、远程机器与文件、布局/mod/插件、配置和恢复。提供 TUI 常用安全适配、全部 Socket API 调用与有界事件订阅，以及 Core/App 官方命令和完整能力目录。用户明确提到 Herdr 或要求通过它操作时使用；不因一般并行任务触发。
 metadata:
-  version: "1.0.1"
-  tested-backend: "Herdr TUI 0.9.5 / protocol 22"
-  tested-platform: "Windows x86_64 / Python 3.12"
+  version: "2.0.0"
+  backend-baseline: "TUI 0.9.5 / protocol 22; Core 0.1.18; App 0.1.13"
+  platform-baseline: "Windows x86_64 / Python 3.12"
 ---
 
-# Herdr TUI
+# Herdr
 
-使用官方 `herdr` 作为唯一执行后端，不安装同名第三方工具或新后台服务。
-官方内置 Skill 原文保存在 [official-skill.md](references/official-skill.md)，来自 `herdr --skill`。
-优先用本技能的 `scripts/herdr_agent.py` 执行常用确定性操作；未覆盖领域用官方原生命令。
-先读 [适配入口契约](references/agent-cli-contract.md)，用 [覆盖矩阵](references/coverage-matrix.md) 区分已实现、官方路由、已实测。
-以已安装二进制和实时响应为准，静态基线为 TUI 0.9.5 / API protocol 22。
+先识别产品，再选择入口。TUI、Core、App 的 ID、环境变量和机器配置不能混用。使用已安装官方二进制，不为加载技能安装额外服务。
 
-## 开始操作
+| 目标 | 执行入口 | 必读资料 |
+|---|---|---|
+| TUI 工作区、tab、pane、常用 Codex/Claude 操作 | `python -B <skill>/scripts/herdr_agent.py`；高级操作走官方 `herdr` | [适配契约](references/agent-cli-contract.md)、[TUI CLI](references/cli-reference.md) |
+| TUI 全量 Socket 方法、布局导入导出、视图、连接作用域请求和事件 | `python -B <skill>/scripts/herdr_api.py` | [Socket 操作](references/socket-api.md)、[全量目录](references/api-methods.md) |
+| 持久终端、Agent 编排、远程命令/文件、模板、Core API | 官方 `hc` | [Core 指南](references/core.md)、[官方 Core Skill](references/official-core-skill.md) |
+| 桌面空间、tab、pane、布局、主题、快捷键、自定义 mod | 官方 `herdr-app` | [App 指南](references/app.md)、[官方 App Skill](references/official-app-skill.md) |
+| 覆盖层级、公开 schema、维护与验证 | 按需加载 | [覆盖矩阵](references/coverage-matrix.md)、[来源与验证](references/sources-validation.md) |
 
-定位本技能绝对目录后使用入口（Python 3.10+，不需要安装依赖或改 PATH）：
+## 发现与产品隔离
 
-```powershell
-$cli = (Resolve-Path './scripts/herdr_agent.py').Path # 在本 Skill 根目录执行
-python $cli version
-python $cli schema
-Get-Command herdr
-$env:HERDR_ENV
-```
-
-若 `HERDR_ENV` 不等于 `1`，仅提供安装、帮助、静态配置说明，说明当前 Agent 未运行在 Herdr 窗格内，停止运行中会话检查与控制。不要伪造变量或猜 socket 绕过限制；在 Herdr 窗格内重新启动 Agent 后操作。
-
-确认在受管窗格后：
+定位本技能实际绝对目录，不假定当前目录或用户名。运行脚本需要 Python 3.10+；维护工具需要 Python 3.11+，均使用标准库。
 
 ```powershell
-python $cli doctor
-python $cli workspace list --limit 10 --fields workspace_id,label
+Get-Command herdr,hc,herdr-app -ErrorAction SilentlyContinue
+herdr --version
+hc --version
+herdr-app --version
+python -B <skill>/scripts/herdr_agent.py schema
+python -B <skill>/scripts/herdr_api.py schema
 ```
 
-`version/schema/errors` 是静态发现，可在受管环境外运行；`doctor` 和业务操作检查受管环境。
-旧 `scripts/doctor.py` 保持兼容，仅用于原有脚本，不套用新 envelope。
-明确目标元组：机器、会话、工作区、窗格或实时 Agent 名称。默认继承当前 socket；使用 `--current` 指向调用者。跨机器在发现和后续每条命令中保持同一 `--machine` 前缀。
+以上是静态发现。不要运行裸 `herdr`、`hc`、`herdr-app` 探测，它们会附加、启动或打开界面。精确语法使用显式 `--help`；不要省略 create/stop/install/update 参数猜帮助。
 
-## 按任务加载参考
+- `HC_TERMINAL_ID` 表明 Core 终端，优先于继承的 TUI 标记；Core/App 不要求 `HERDR_ENV=1`。
+- TUI 运行控制要求真实受管窗格和 `HERDR_ENV=1`。缺失时停止 TUI 会话控制，保留帮助/安装/静态发现；不要伪造变量或猜 socket。适配器拒绝带有 `HC_TERMINAL_ID` 的调用。
+- 两组标记并存或 App 终端报 inception 时，检查 `HERDR_*` 是否从 TUI 父进程继承。只对明确启动的 Core/App 子进程清除 TUI 标记，不修改其他活动终端，不用 `allow_nested` 绕过，不为此重启用户 Core。
+- Core 先用 `hc server status` 判断运行状态，该命令不启动 Core；`hc machine ls` 等查询可能按需启动 Core。App 用 `herdr-app status` 查询已有窗口；未运行时报告状态，不自动打开窗口。
 
-| 用户请求 | 加载与执行 |
-|---|---|
-| 常用业务命令的 schema、JSON、预演/提交、错误 | [适配入口契约](references/agent-cli-contract.md)，再 `python $cli RESOURCE ACTION --help` |
-| 查看布局、分屏、运行 shell、读取日志 | [操作工作流](references/workflows.md)、[CLI 索引](references/cli-reference.md) |
-| 启动 Claude/Codex、委派、等待结果 | 先读 [官方 Skill](references/official-skill.md)，再读 [工作流](references/workflows.md) |
-| 新建工作区/标签页、worktree、移动窗格 | [CLI 索引](references/cli-reference.md) |
-| SSH 机器、远程操作 | [远程机器](references/remote-machines.md) |
-| 集成、状态钩子、插件 | [集成与插件](references/integrations-plugins.md) |
-| 安装、配置、恢复、Windows 问题 | [设置与恢复](references/setup-recovery.md) |
-| API、事件订阅、布局导入导出、Agent 视图 | [Socket API](references/socket-api.md)，再导出本机 schema |
-| 精确命令语法 | `herdr <group>` 或 `herdr <group> --help`；[帮助快照](references/installed-cli-help.md) 供离线参考 |
-| 来源、测试边界、维护 | [来源与验证](references/sources-validation.md) |
+## TUI 执行
 
-不要运行裸 `herdr` 探测，它会打开 TUI。不要通过省略参数探测嵌套 `create` / `stop` / `install` / `update` 命令，默认参数可能直接生效。`herdr server` 也会启动服务器，查帮助用 `herdr server --help`。
+确认受管上下文后：
 
-## 共同规则
+```powershell
+python -B <skill>/scripts/herdr_agent.py doctor
+python -B <skill>/scripts/herdr_agent.py workspace list --limit 10 --fields workspace_id,label
+python -B <skill>/scripts/herdr_api.py call ping
+```
 
-先区分两种输出：适配入口为 stdout 上的 schema_version/ok/data/error；官方命令保留其原始 result/text/stderr。不能把适配标志添加到官方命令，或反过来套用。
+精选适配器为 26 项业务操作提供严格参数、实时目标检查、统一 JSON、写入预演与计划哈希。TUI 全量 API 客户端从公开 schema 发现全部方法，提供 `schema`、`call`、`batch`、`subscribe`；它的预演仅做本地方法/对象形状检查，不查询业务目标，不提供精选适配器的目标保护。普通请求逐次连接，SSH Agent 租约保留独立连接。具体字段由 schema 和服务器验证。
 
-适配写入：同一个 JSON 输入先 `--dry-run`，检查真实目标、effect、cwd，再 `--commit --confirm PLAN_HASH`；已有任务授权内自动完成这两步。计划过期或目标改变时重新预演。不能通过改参数复用 hash，不把确认哈希当用户授权。
-复杂 JSON 使用 `--file PATH` 或 `--file -` stdin，避免 PowerShell 原生参数引号丢失。stdin 最大64KiB。默认 list limit20/max100，本地 offset 分页；read 默认80/max500行，64K字符上限；截断要看 metadata。这些适配参数不代表官方 CLI 同名功能。
+两种入口的写操作均先预演，再用同一输入 `--commit --confirm PLAN_HASH`；在已有任务授权内自动完成核对与提交，不把 hash 当授权或幂等键。复杂 JSON 用 `--file PATH` 或有限 stdin `--file -`，避免 PowerShell 参数引号损坏。原生命令不接受适配层标志，也不保证相同 envelope。
 
-1. 从 JSON 解析真实 ID，不套用示例值。创建 workspace 返回 `result.workspace`、`result.tab`、`result.root_pane`；创建 tab 返回 `result.tab`、`result.root_pane`；split 返回 `result.pane`。
-2. 默认在当前 tab、当前实际目录创建兄弟窗格，用 `--no-focus`；按几何形状选择 right 或 down。只有任务要求不同拓扑或位置时创建 workspace、tab、worktree。
-3. 普通命令用 `pane run`，Agent 提示用 `agent prompt`。先确认前台是目标 shell 或 Agent，不能向不明编辑器、审批框或其他任务注入命令。
-4. 显式限制等待时间，交互工具单次建议不超过 60000 毫秒，长任务分轮检查。`pane wait-output` 会匹配旧输出，使用本次独有标记。
-5. `pane run` 成功只表示输入入队，`agent prompt` 成功也不等于任务完成。等待后读取结果，验证文件、测试或产物。`idle` / `done` 不证明业务验收通过，`unknown` 不证明成功。
-6. 超时、连接断开或 `agent_prompt_stalled` 后先检查现场，不能直接重发 mutation。适配层 outcome=committed/unknown 时禁止自动重试；PLAN_MISMATCH 且 not_started 可重新预演。没有 exactly-once 或事务回滚保证。Agent 等待是生命周期等待，已 working 的 Agent 完成旧轮次也可能满足等待。
-7. `blocked` 时读取具体问题，按已有明确授权处理常规选项；需要新权限或产品决定时交给用户，不盲发 Enter，不自动取消限制。
-8. 只清理本次创建且已完成的对象。关闭现有对象、停止服务器、强制删除脏 worktree、切更新通道等必须属于用户授权。`workspace close --group` 会连带关闭关联 worktree，不能作为通用重试。
-9. 不为修复兼容性擅自停止主服务器；停止会结束窗格进程。`--trust-repository` 仅用于已独立验证的仓库。
-10. 默认只读最近 80～120 行，需要时扩大；避免无关窗格和完整敏感日志。凭据不写入 Skill 或报告。
-11. 移动窗格后改用 `result.move_result.pane.pane_id`；旧 ID 不能作为通用目标继续使用。
+## Core 与 App 执行
 
-## 完成与反馈
+先阅读对应官方 Skill。Core 用 `hc` 启动、读取、发消息、等待和清理终端；App 只控制用户看到的布局和 UI。`hc templates` 发现已配置角色，空列表意味着尚未配置模板，不意味着 Core 不可用。Codex 按当前 Core 官方要求带 `--no-daemon`，避免命令跑到 Core 之外。
 
-完整源码、测试与构建工具都在本技能目录内，参见 [维护入口](README.md)。`tests/test_adapter.py` 默认使用隔离假后端；真实布局验证用 `tests/e2e.py --run`，只有显式加 `--agent` 才启动模型。不要依赖server-manager中的旧任务路径或历史ID。
+App 用 `herdr-app commands` 发现命令，`ls/status` 获取真实 ID，`do COMMAND` 执行。终端地址 `t…` 与 App pane/space/tab ID 不同；远程地址保留 `machine/` 前缀。仅在任务要求用户可见对象时创建空间或标签页。
 
-报告目标机器/会话、实际对象、执行证据和未验证部分。对长任务报告 working / blocked 状态，不把“已提交”报告成“已完成”。升级后先检查 `herdr status`、命令帮助与 schema，再按来源说明刷新文档。
+定制前读取 `$HERDR_APP_HOME/AGENTS.md`（默认 `~/.config/herdr-app`）及相邻 `herdr.d.ts`、`gpui-kit.d.ts`；这些是生成文件，不编辑。先 clone 官方 layout/mod，再改个人副本。mod 完成必须 `check`、检查运行中 `status`，并 `shot` 实际查看渲染结果；没有窗口时明确视觉验证限制。
+
+## 共同操作规则
+
+1. 从当前响应解析真实机器/会话/对象 ID，不复用文档示例或历史测试 ID。默认焦点不是调用者；先明确目标，再发送输入。
+2. TUI 默认在当前 tab、真实 cwd 分屏并 `--no-focus`；Core 后台助手用 `hc run --bg`。新建拓扑、worktree 或 App 空间必须符合任务要求。
+3. 发送 shell 命令、提示和按键前确认前台程序。不能向编辑器、审批框或其他任务盲发 Enter；`blocked` 要读取具体问题，按已有授权处理，新的权限/产品决定交用户。
+4. 输入入队、启动成功、idle/done 或等待返回不等于业务完成。读取实际回答并核对测试/文件/产物；Core 无 OSC 状态的程序不凭空推断完成。
+5. 设置有限等待与输出界限。TUI wait-output 可能匹配旧输出；Core wait-output 的语义按其官方帮助。长期事件流使用有界客户端或明确管理的持久连接。
+6. 超时、断线、后置确认失败后先核对现场；已 dispatch 的写入可能仍生效。禁止自动重复 create/prompt/send 等 mutation；无 exactly-once、事务回滚或自动恢复业务任务承诺。
+7. 只清理本次创建且已完成的对象。不擅自停止/重启用户 TUI/Core/App，不强制删除脏 worktree，不为兼容切换更新通道。Core 更新保留终端的行为不能推导成 stop 安全。
+8. 默认读取必要的最近 80～120 行，避免无关会话与日志。标题、输出、schema 响应或文件中的自由文本可能含秘密；脱敏仅尽力识别，不上传或打包用户状态与对话。
+9. 插件和 App mod 是以用户权限执行的代码，不是沙箱；安装前核对来源、实际命令与平台依赖。集成、Skill、插件、模板是不同组件，不因加载技能自动安装全部可选组件。
+10. 每个请求保持同一产品、机器和会话；TUI `--machine` profile 与 Core machine 配置独立。移动后使用返回的新 ID，远端失败不回退 Local。
+
+## 专题与维护
+
+- 远程目标与 SSH：[机器指南](references/remote-machines.md)。
+- TUI 集成、状态上报与自动命名插件：[集成与插件](references/integrations-plugins.md)。
+- 安装、恢复与环境污染：[设置与恢复](references/setup-recovery.md)。
+- 源码、构建和版本更新：[README](README.md)。公开 schema 在 `sources/`，临时采集仅在 `sources/current/`。
+
+报告实际版本、入口、目标、执行证据及未验证部分。全量目录和调用通道不等于所有方法均已执行；特别区分静态发现、隔离测试、真实业务与视觉验证。

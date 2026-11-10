@@ -30,7 +30,7 @@ def main():
         parser.error('timeout must be in (0,60]; max-chars must be in [256,20000]')
     candidate = os.environ.get('HERDR_BIN_PATH') or shutil.which('herdr')
     binary = str(Path(candidate).resolve()) if candidate else None
-    inside = os.environ.get('HERDR_ENV') == '1'
+    inside = os.environ.get('HERDR_ENV') == '1' and not os.environ.get('HC_TERMINAL_ID')
     report = {'product':'Herdr TUI', 'binary':binary, 'managed_pane':inside,
               'context':{key:os.environ.get(key) for key in
                          ['HERDR_WORKSPACE_ID','HERDR_TAB_ID','HERDR_PANE_ID']}, 'checks':[]}

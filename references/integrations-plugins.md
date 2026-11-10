@@ -1,4 +1,4 @@
-# 集成、状态上报与插件
+# 集成、状态上报与插件（2.0.0）
 
 ## 内置集成
 
@@ -8,9 +8,9 @@ herdr integration install KIND
 herdr integration uninstall KIND
 ```
 
-集成=Agent 原生状态/会话钩子，Skill=Agent 操作说明，plugin=Herdr 加载的工作流扩展；三者不能互相替代。安装集成会改 Agent 配置，先检查已有集成和任务范围。不要安装 CLI 已不支持的平台集成。
-Windows 官方支持集合比可识别 kind 少：Pi、OMP、Claude、Codex、Copilot、Devin、OpenCode、Kilo、Droid、Kimi、Qoder、Antigravity。实际集合以当前 `herdr integration` 和平台返回为准。
-原生恢复需要集成上报 agent_session；单纯“识别到进程”不能保证重启后恢复对话。安装后验收 integration status 以及新 Agent 的 get/list 中 agent_session。
+本页命令属于 TUI。集成=Agent 原生状态/会话钩子，Skill=Agent 操作说明，plugin=TUI 加载的工作流扩展；App 的 JavaScript mod 是另一套扩展，见 [App 指南](app.md)。安装集成会改 Agent 配置，只在任务授权范围内安装，不因升级技能安装无关集成。
+当前 `herdr integration install --help` 列出 18 个 TARGET：pi、omp、claude、codex、copilot、devin、droid、kimi、opencode、kilo、hermes、qodercli、qwen、cursor、mastracode、antigravity-cli、grok、letta。此列表是 CLI 可接受枚举，不保证每个平台可安装；以当前帮助及 integration status 的平台结果为准，不沿用旧的 Windows 12 项固定集合。agent start 的 kind（如 agy）与 integration TARGET（antigravity-cli）也不能机械互换。
+原生恢复需要集成上报 agent_session；单纯“识别到进程”不能保证重启后恢复对话。安装后核对 integration status 及新 Agent 的 agent_session，不能用历史对话实测代替当前安装验收。
 
 ## 检测清单
 
@@ -69,3 +69,9 @@ config-dir 可能创建目录或初始化旧配置，不属于纯只读命令。
 Windows 插件属于预览，清单声明 platforms，argv 需支持 Windows，不假设存在 sh。先在测试对象验证。popup 是会话级模态终端，通常没有 pane_id，也不参与 pane/agent API；关闭需对应 popup.close API。后台操作优先 split/tab 和 --no-focus，避免抢占用户模态界面。
 
 插件持久登记在会话旁 plugins.json，进程外执行声明命令；插件配置/状态目录由插件自己管理，Herdr 不提供通用插件存储 API。环境提供 HERDR_BIN_PATH、HERDR_SOCKET_PATH、HERDR_PLUGIN_ROOT、HERDR_PLUGIN_CONFIG_DIR、HERDR_PLUGIN_STATE_DIR、HERDR_PLUGIN_CONTEXT_JSON 及可用 pane 上下文，调用时优先官方 binary。
+
+## Core / App 的状态与扩展
+
+Core 使用程序 OSC 7501 状态报告，由 `hc get` / `wait` 观察；它不复用 TUI 的 pane report-agent、manifest 或 HERDR_ENV 门槛。当前 Core Skill 要求 Codex（包括模板）带 `--no-daemon`。普通程序没有 Agent status 属正常情况；不能把“可读取屏幕、可发按键”当作已支持所有生命周期上报。
+
+App 的 mods 以其 home 内 generated AGENTS.md / herdr.d.ts / gpui-kit.d.ts 为准，使用 mod.clone、热重载、check/status/shot 流程。不要用 TUI plugin install/link 管理 App mod，也不要把 App mod 的命令网络权限理解为隔离沙箱。

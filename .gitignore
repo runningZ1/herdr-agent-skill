@@ -10,7 +10,10 @@ build/
 *.egg-info/
 development/evidence/
 development/history/
-sources/
+sources/*
+!sources/herdr-api.schema.json
+!sources/core-api.schema.json
+!sources/app-commands.json
 *.log
 .DS_Store
 Thumbs.db

@@ -1,10 +1,12 @@
-# Herdr Agent 适配入口 1.0.1
+# Herdr Agent 精选适配入口 2.0.0
 
 ## 入口与定位
 
-`python scripts/herdr_agent.py RESOURCE ACTION [OPTIONS]`（先定位到本 Skill 的绝对目录）。要求 Python 3.10+、官方 Herdr TUI 0.9.5；运行中业务操作要求 HERDR_ENV=1。只声明 Windows 原生实测。
+`python scripts/herdr_agent.py RESOURCE ACTION [OPTIONS]`（先定位到本 Skill 的绝对目录）。要求 Python 3.10+、官方 Herdr TUI 0.9.5；运行中 TUI 业务操作要求真实 HERDR_ENV=1 上下文。历史运行证据仅为 Windows，不能据此声明 2.0.0 或其他产品已全部实测。
 
-入口复用官方 CLI，不需要安装另一个 Herdr 服务、配置新账号或改 PATH。与原生 `herdr` 区分命名。完整官方能力仍使用其对应参考页；不能把适配层 schema 当作完整 Herdr socket schema。
+本契约只描述 TUI 精选适配入口。HC_TERMINAL_ID 存在时优先识别为 Core，Core/App 不受 TUI HERDR_ENV 门槛；两种标记并存先排查 HERDR_* 继承污染，不据此启用 TUI，不重启 Core、不使用 allow_nested。Core 用 hc 原生入口，App 用 herdr-app，见 [Core](core.md) / [App](app.md)。
+
+入口复用官方 CLI，不需要安装另一个 Herdr 服务、配置新账号或改 PATH。完整 TUI API 的 schema/call/subscribe 由 scripts/herdr_api.py 提供；参数以脚本帮助和 [Socket 页](socket-api.md) 为准。不能把精选适配层 schema 当作完整 102 方法目录，不能把它扩展为 Core/App wrapper。
 
 ```powershell
 $cli = (Resolve-Path './scripts/herdr_agent.py').Path # 在本 Skill 根目录执行
@@ -63,7 +65,7 @@ python $cli workspace create --file $request --commit --confirm $plan.data.plan_
 | pane read | target（pane_id） | source, lines | 有界文本快照 |
 | agent list/get | get: target | 无 | 目标是 live name/pane_id |
 | agent start | name, kind, pane | 无 | kind=codex/claude；验证预期种类和交互就绪 |
-| agent rename | target, name | 无 | 设置实时名称，accepted 不等于二次验证 |
+| agent rename | target, name | 无 | 执行后 get 核对实际 name，成功返回 renamed/confirmed=true |
 | agent prompt | target, text | 无 | 仅闲置且可输入 Agent；返回 submitted/task_complete=false |
 | agent wait | target | 无 | 有界生命周期等待，不能解释为任务成功 |
 | agent read | target | source, lines | 读实际回答，必须区分提示回显和 Agent 回复 |
@@ -85,7 +87,7 @@ read 最多保留 64000 字符，truncated=true 明确标注；不截断序列�
 |---|---|---|
 | 0 | result | 检查 verification，不仅看 exit |
 | 2 | INVALID_INPUT | schema/help 修正字段/类型/范围 |
-| 3 | OUTSIDE_HERDR / DEPENDENCY_MISSING / INCOMPATIBLE_VERSION / RESOURCE_NOT_FOUND | 修复受管环境/安装/版本/目标；不自动重启服务器 |
+| 3 | OUTSIDE_HERDR / DEPENDENCY_MISSING / INCOMPATIBLE_VERSION / RESOURCE_NOT_FOUND | 修复 TUI 受管环境/安装/版本/目标；Core/App 改用原生入口，不自动重启服务器 |
 | 4 | TIMEOUT / BACKEND_UNAVAILABLE | 查询实际状态，再决定后续 |
 | 5 | STATE_CONFLICT / PLAN_MISMATCH | 读取现场或重新预演 |
 | 1 | BACKEND_ERROR / BACKEND_PROTOCOL / OUTPUT_LIMIT / INTERNAL | 停止盲重试，查看结构化详情 |
@@ -96,4 +98,4 @@ read 最多保留 64000 字符，truncated=true 明确标注；不截断序列�
 
 ## 限制
 
-不新增沙箱；既有 Herdr/Agent 保持其自身权限、网络和文件访问。超时仅终止本次 CLI 子进程，已启动的 Agent 或命令可能继续。无远端适配、长期订阅、独立二进制、后台 job store、事务回滚、exactly-once 保证。其他官方领域由 Skill 原生路由完整覆盖，不将其标成适配层已实现。
+不新增沙箱；既有 Herdr/Agent 保持其自身权限、网络和文件访问。超时仅终止本次 CLI 子进程，已启动的 Agent 或命令可能继续。精选适配入口不提供远端适配、长期订阅、独立二进制、后台 job store、事务回滚或 exactly-once 保证。完整 TUI API 及订阅使用独立 herdr_api.py；Core/App 使用原生路由。对应文档和路由数量不等于逐项业务实测，见 [覆盖矩阵](coverage-matrix.md)。

@@ -1,102 +1,107 @@
-# Herdr Agent Skill
+# Herdr Agent Skill 2.0.0
 
-面向 AI Agent 的 Herdr TUI 操作技能与无交互 CLI 适配器。通过官方 `herdr` 管理工作区、标签页、窗格与 Codex/Claude 生命周期，提供稳定 JSON、能力发现、有界读取和写操作预演。
+统一操作 Herdr TUI、Herdr Core 和桌面 App 的 Agent Skill，使用官方 `herdr`、`hc`、`herdr-app` 作为后端。包含 TUI 常用安全适配、全量 Socket API 客户端、Core/App 完整操作目录与官方 Skill 快照。
 
-这是独立维护的社区项目。官方 Herdr TUI 需要另外安装；Herdr App / `hc` 不适用。
+独立维护的社区项目。官方应用和 Agent 自身需要另外安装；加载本技能不会安装服务、集成、插件或模型。
 
 ## 快速开始
 
-要求 Python 3.10+，无第三方运行依赖。当前验证环境为 Windows x86_64、Python 3.12、Herdr TUI 0.9.5 / protocol 22；其他平台尚未验证。
+将整个目录放进宿主支持的技能目录，让 Agent 加载 [SKILL.md](SKILL.md)。脚本运行使用技能实际路径，不依赖当前工作区或固定用户名。在本仓库根目录可执行：
 
 ```powershell
-git clone https://github.com/runningZ1/herdr-agent-skill.git herdr
-cd herdr
 python -B scripts/herdr_agent.py version
 python -B scripts/herdr_agent.py schema
-python -B scripts/herdr_agent.py errors
+python -B scripts/herdr_api.py schema
+herdr --version
+hc --version
+herdr-app --version
 ```
 
-上述命令不访问运行中的会话。运行控制必须从 Herdr 管理的窗格内执行，且 `HERDR_ENV=1`；不要在外部伪造环境变量绕过限制。
+运行脚本要求 Python 3.10+；`tools/` 维护工具要求 Python 3.11+（使用标准库 TOML 解析）。均无第三方 Python 依赖。本轮基线为 Windows x86_64 / Python 3.12、TUI 0.9.5 / protocol 22、Core 0.1.18、App 0.1.13；其他平台的运行验证单独报告。
+
+## 三个操作面
+
+| 产品 | 入口与覆盖 | 资料 |
+|---|---|---|
+| TUI `herdr` | 26 项精选适配；102 项 Socket 方法均有通用通道；其他本地管理用官方 CLI | [适配契约](references/agent-cli-contract.md)、[Socket](references/socket-api.md)、[TUI CLI](references/cli-reference.md) |
+| Core `hc` | 32 项 API 的原生 CLI / connect 路由；持久终端、Agent、远程文件和命令、模板、事件 | [Core 指南](references/core.md)、[官方 Skill](references/official-core-skill.md) |
+| App `herdr-app` | 71 条内置 commands；空间、tab、pane、布局、主题、按键和 mod | [App 指南](references/app.md)、[官方 Skill](references/official-app-skill.md) |
+
+数量来自发布快照，是能力发现与调用路由的范围，不是逐项实测数量。完整来源在 [方法目录](references/api-methods.md) 和 [覆盖矩阵](references/coverage-matrix.md)。
+
+`HERDR_ENV=1` 只用于真实 TUI 窗格；Core/App 不受此门槛。`HC_TERMINAL_ID` 优先表明 Core 上下文，TUI 适配器会拒绝带该变量的调用。若 App/Core 子进程继承了 TUI 的 `HERDR_*`，只清理将启动的子进程环境；不使用 `allow_nested` 绕过，不重启现有服务。
+
+`hc server status` 不启动 Core，而机器列表等查询可能按需启动。App 静态 `commands/--skill` 不需要窗口；`ls/status/shot` 需要已有窗口。不运行裸二进制探测。
+
+## TUI 安全适配与全量 API
+
+真实 TUI 受管窗格内执行：
 
 ```powershell
 python -B scripts/herdr_agent.py doctor
 python -B scripts/herdr_agent.py workspace list --limit 10 --fields workspace_id,label
-python -B scripts/herdr_agent.py workspace create --help
+python -B scripts/herdr_api.py call ping
+python -B scripts/herdr_api.py schema --method layout.apply
 ```
 
-若作为 Agent Skill 安装，将整个目录放入宿主支持的技能目录，保持目录名 `herdr`，并让 Agent 加载 [SKILL.md](SKILL.md)。执行脚本时使用该 Skill 的实际路径，不依赖特定用户名或项目目录。
+精选适配器检查实时目标、业务参数及后置状态。写操作默认预演，核对后使用同一输入 `--commit --confirm PLAN_HASH` 提交。计划 hash 是一致性检查，不是用户授权，也不提供幂等和回滚。
 
-## 能力与执行规则
+全量 API 客户端支持 `call`、逐请求连接的 `batch`、有界 `subscribe`，并为连接作用域的 SSH Agent 登记保留独立租约。它与精选适配器的保护程度不同：预演只检查方法和 JSON 对象形状，不查询业务目标；服务器执行时验证完整参数。所有非只读方法默认预演。原始 API 的完整 schema 随包分发，不需要自己猜参数或 Windows pipe 名称。具体示例、超时、连接作用域及未知写入恢复见 [Socket 操作指南](references/socket-api.md)。
 
-| 能力 | 行为 |
-|---|---|
-| 工作区、标签页、窗格 | 查询、创建、布局与有界读取；具体操作以 schema 为准 |
-| Agent 生命周期与消息 | 启动、查询、发送提示、等待、读取结果 |
-| 机器协议 | JSON / JSONL；统一 `ok`、`data` / `error`、请求 ID 和退出码 |
-| 写操作 | 默认预演，核对目标后以 `--commit --confirm PLAN_HASH` 提交 |
-| 输入与读取 | JSON 文件或 stdin；列表分页、字段投影、超时与截断标记 |
-| 高级官方功能 | worktree、SSH、插件、集成等通过专题参考路由到官方命令 |
+复杂 JSON 使用 `--file PATH` 或有限 stdin `--file -`。两个脚本与原生 CLI 的参数/输出不能混用。成功仅表示相应调用完成，输入入队、启动成功或 Agent done 都不能替代业务验收。
 
-复杂 JSON 优先使用 `--file PATH` 或 `--file -`，避免 shell 引号损坏。stdout 中 `ok=true` 仅代表该命令声明的成功：提示入队、Agent 空闲或等待结束都不能代替业务结果验收。
+## 对话窗口自动命名
 
-写入失败且 `outcome=committed` 或 `unknown` 时，先核对现场，不盲目重发。计划摘要是参数一致性检查，不是用户授权，也不提供 exactly-once 或事务回滚。
-
-详细说明：[适配契约](references/agent-cli-contract.md) · [覆盖矩阵](references/coverage-matrix.md) · [操作工作流](references/workflows.md) · [来源与验证边界](references/sources-validation.md)。
-
-## 对话窗口自动命名（Herdr TUI）
-
-可选插件 `plugins/auto-name/` 使用官方事件钩子命名默认序号标签页，不启动额外常驻服务。要求 Python 3.10+ 和 Herdr TUI 0.9.5；已在 Windows 验证。
+可选 TUI 插件随源码和 ZIP 一起提供：
 
 ```powershell
 herdr plugin link ./plugins/auto-name
 herdr plugin action invoke local.auto-name.sync
-```
-
-插件在会话启动、新建标签页/窗格、Agent 检测/状态变化和窗格聚焦时自动处理。优先采用 Agent 上报的对话标题，去掉 OMP 状态旋转符和标题前缀；Claude 只有通用标题时，从本机对应会话的首段读取第一条用户消息。没有对话主题时先用“Agent · 项目目录”，得到主题后更新。标题最多 36 字符，读取和命名均不调用外部模型。
-
-只修改空名称、纯数字名称，以及插件自己生成且未被手动修改的名称。已有自定义名称保持不变；手动改名后停止跟随，改回纯数字可恢复自动命名。多窗格标签页优先用首个 Agent 的主题。插件状态保存在 Herdr 提供的插件状态目录，并按会话 socket 隔离；不直接修改 `session.json`。命名前会重新核对标签，API 查询与重命名之间仍存在极短的并发窗口。
-
-```powershell
-python -B tests/test_auto_name.py
-herdr plugin log list --plugin local.auto-name --limit 10
 herdr plugin disable local.auto-name
 ```
 
-禁用只停止后续自动命名，已经设置的名称保留。本插件不适用于 Herdr App / `hc`。
+保留人工名称，仅命名空/数字标签和插件自身仍拥有的名称。优先采用 Agent 标题；Claude 通用标题会从确切本机会话的有限片段读取首条用户消息；无主题时使用 Agent 与目录。该插件不适用 Core/App。
 
-## 测试与构建
+2.0.0 修复空 `cwd` 崩溃，并在每次 rename 前原子保存待确认状态；后续查询或其他标签失败不会丢失已完成的归属。未知结果仍显示旧名时保持待确认，不盲目重发。Herdr 没有条件 rename，最后一次查询与写入之间仍有并发窗口。
 
-在仓库根目录执行：
+常见秘密在进入名称前尽力脱敏；无法识别任意形式敏感文本，首句其余内容仍会展示到标签。状态保存名称指纹，日志不输出标题明文。禁用只停止后续命名，保留已有名称。
+
+## 验证与分发
 
 ```powershell
 python -B tests/test_adapter.py
+python -B tests/test_socket_api.py
+python -B tests/test_auto_name.py
+python -B tests/test_tools.py
 python -B tools/validate.py
+python -B tools/validate.py --live
 python -B tools/build.py --verify
 ```
 
-默认测试使用隔离后端，不连接真实会话、不启动模型。构建结果位于 `dist/herdr.zip`，同时生成 SHA256 校验文件；解包验证会再次运行契约测试。
+默认测试使用隔离状态和模拟后端，不启动付费模型，不操作真实标签。`--live` 只核对 TUI 官方 Skill、doctor 和有界工作区列表，不自动启动 Core/App。真实变更场景可按 [E2E 脚本](tests/e2e.py) 使用 `--run`；仅额外指定 `--agent` 时启动模型。
 
-真实验证必须在受管窗格内显式启动：
+分发包为 `dist/herdr.zip` 与 SHA256 校验文件；包含源码、三份公开 schema、官方 Skill、插件 Python 入口及 TOML 清单。排除本机证据、历史目录、用户会话、日志、临时采集和缓存。`--verify` 解包后执行包内回归和静态完整性检查。
+
+## 维护官方能力基线
 
 ```powershell
-python -B tools/validate.py --live
-python -B tests/e2e.py --run
+python -B tools/collect.py
+# 审阅差异后发布公开快照：
+python -B tools/collect.py --publish
 ```
 
-E2E 会创建并清理标记的测试对象。只有额外指定 `--agent claude` 或 `--agent codex` 才测试模型交互并使用已有额度。请先阅读 [测试脚本](tests/e2e.py) 的帮助与清理边界。
+默认只将静态资料写入被忽略的 `sources/current/` 并报告与发布快照的差异；`--publish` 更新公开 schema、官方 Skill、帮助和 API 目录。采集器直接调用静态官方命令，不沿用业务适配器精确版本拒绝策略。它不会采集用户对话或机器配置。
 
-## 源码与维护
+升级后重新核对协议、路由、平台限制与测试；采集成功不代表兼容性或业务验收通过。来源和历史验证见 [sources-validation.md](references/sources-validation.md)。
 
-| 目录 | 用途 |
-|---|---|
-| `scripts/` | 适配器与兼容诊断入口 |
-| `tests/` | 契约测试、显式真实 E2E |
-| `tools/` | 验证、构建、官方资料采集 |
-| `references/` | 上游资料、命令参考与操作契约 |
-| `development/` | 设计和审查文档；本机证据与历史脚本被 Git 忽略 |
+## 2.0.0 变更
 
-`python -B tools/collect.py` 将本机官方资料导出到被忽略的 `sources/current/`，不覆盖维护中的参考文档。不要提交会话文件、终端原始输出、凭据或本机验收 JSON。
+- 从 TUI 技能扩展为 TUI/Core/App 统一路由，保留产品权限、ID 和机器配置隔离。
+- 新增全部 TUI 方法的真实 Unix socket / Windows named-pipe 通道、顺序批次、SSH Agent 租约与有界事件采集。
+- 修复自动命名的空值与不确定写入恢复，降低状态/日志中的主题暴露。
+- 修复插件、TOML 和 schema 分发遗漏，更新采集、目录一致性与 CI 检查。
+- 修正订阅字段、个人默认远端、过时集成列表及过强覆盖声明。
 
 ## 协议与归属
 
-本项目原创代码与文档采用 [MIT License](LICENSE)。随附的 Herdr 官方资料保留 Apache-2.0，参见 [第三方声明](THIRD_PARTY_NOTICES.md) 和 [上游协议副本](LICENSES/Apache-2.0.txt)。本项目与 Herdr 官方不存在隶属关系。
+原创代码与文档采用 [MIT](LICENSE)。官方资料保留各自上游归属，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；技能不重新许可官方应用。本项目与 Herdr 官方无隶属关系。

@@ -1,4 +1,10 @@
-# 终端与 Agent 操作工作流
+# 终端与 Agent 操作工作流（2.0.0）
+
+## 先选产品
+
+以下 workspace/tab/pane/agent 示例属于 TUI `herdr`，要求真实 TUI 上下文。`HC_TERMINAL_ID` 存在时优先使用 [Core 工作流](core.md) 调度程序与 Agent；改变 App 用户窗口则使用 [App 工作流](app.md)。Core/App 不以 HERDR_ENV 为门槛；两种标记并存时先按 [排障页](setup-recovery.md) 排查 HERDR_* 继承污染，只清理将启动的子进程，不重启用户 Core、不用 allow_nested 绕过。
+
+Core 的短程序、持久程序、子 Agent、文件与事件分别由 hc exec/run/send/wait/file/events 原生处理。App 用 commands 静态发现、ls/status 查看运行窗口、do 修改明确目标；无需改变窗口的 worker 保持隐藏。先检查 hc server status，注意 hc machine ls 可按需启动 Core。产品的机器配置和 ID 各自独立。
 
 ## PowerShell 与 JSON
 
@@ -91,6 +97,8 @@ herdr agent read reviewer --source recent-unwrapped --lines 120
 
 `agent prompt --wait` 默认等首次 idle / done / blocked；只有特定工作流需要 `--until`。等待绑定占用者，替换 Agent 不能满足旧等待。done 与 idle 的差别涉及“已查看”标记；read 不改变它，focus 会改变。
 
+TUI 改实时 Agent 名称用 `herdr agent rename TARGET NAME`（或 --clear）；适配入口的 agent rename 会在执行后 get 核对实际 name，返回 renamed/confirmed=true，不能再写成仅 accepted。Core 可在 hc run 时指定 name；后续用 label 修改展示标签不等于 TUI agent rename。App agent.focus 仅改变用户视图。
+
 ## 读取较长结果
 
 visible=当前屏幕，recent=最近渲染行，recent-unwrapped=合并软折行，detection=检测快照。默认用 recent-unwrapped 和 120 行；`--ansi` 用于确有颜色证据需求。
@@ -99,3 +107,9 @@ alternate screen 不等于普通 scrollback。扩大读取后仍缺失结果时�
 ## 清理
 
 记录本次创建 ID，检查任务已完成后仅关闭这些对象。关闭最后 tab 会关闭 workspace；close 不等于删除 Git worktree。用户要求保留用于观察时不要清理。关闭测试 workspace 前确认其中没有意外迁入的用户窗格。
+
+## 原始 API 与订阅
+
+TUI 全量方法通过 `scripts/herdr_api.py` 的 schema/call/subscribe 入口，实际参数以其 --help/schema 和 [Socket 说明](socket-api.md) 为准；不把精选适配入口 schema 当完整 API。`events.subscribe` 的请求字段是 `subscriptions` 数组；`events.wait` 使用 `match_event` 与可选 timeout_ms，两者不是同一个参数。长期订阅按任务限定对象和时限，写调用失败先核对结果，禁止盲重试。
+
+Core 使用 hc schema / hc connect / hc events 自身协议，App 使用 commands / do 与 generated 类型，不把 TUI 订阅结构套到另外两个产品。覆盖数量仅说明可发现路由，实际业务验收必须读取真实任务结果；详见 [证据口径](coverage-matrix.md)。

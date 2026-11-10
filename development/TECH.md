@@ -1,38 +1,39 @@
-# 架构与机器契约
+# Herdr Skill 2.0.0 架构与机器契约
 
-遵循 agent-cli-creator 2.1.0 的 design-contract、machine-contract、execution-gateway、acceptance-tests。纯标准库 Python，单文件可分发，内部按 registry/parser、policy/planner、backend、verifier、emitter 分层。
+## 产品与接口
 
-## 命令
+herdr 是 TUI；hc 是持久终端 Core；herdr-app 是用户窗口。共享技能入口按任务与上下文路由，不复用产品的 socket、ID、机器配置或生命周期协议。HC_TERMINAL_ID 优先判断 Core，HERDR_ENV 仅约束 TUI；并存时检查污染。清理只作用于将启动的子进程继承环境，不修改用户/系统环境、不停止既有 Core。
 
-`python scripts/herdr_agent.py RESOURCE ACTION [--input JSON|--file PATH|-] [OPTIONS]`
+| 层 | 实现与约束 |
+|---|---|
+| TUI 精选适配 | scripts/herdr_agent.py，标准库 Python；同一 registry 生成 help/schema/argv |
+| TUI 完整 API | scripts/herdr_api.py，schema/call/subscribe；以实际脚本帮助和 sources/herdr-api.schema.json 为契约 |
+| Core | hc 原生 CLI；hc schema 发现 32 方法，hc connect 路由 hello/doc 等无专用命令的 API |
+| App | herdr-app commands 发现 71 内置命令，do 调用；generated 类型定义 mod API |
+| 采集与发布 | tools/collect.py、validate.py、build.py；官方快照与本地增强文档区分，排除会话和凭据 |
 
-发现命令：version、schema、errors、doctor。业务命令由同一注册表生成 help/schema/argv。
-统一标志：--output json|jsonl、--timeout 1..60（秒）、--limit 1..100、--offset >=0、--fields 逗号路径、--dry-run、--commit、--confirm HASH、--quiet、--no-input、--no-color。
-没有输入文件时不读取 stdin；--file - 显式读取且最大 64 KiB。不提供 raw arbitrary argv、shell 文本或 Agent 原生参数入口。
+## 精选适配入口
 
-读命令直接执行，写命令默认预演。预演与提交均执行同一套类型、目录、目标存在/占用者状态验证及官方只读前置查询。dry-run 输出规范化计划摘要和 hash，提交需重新计算相同 hash；目标、环境或 binary 变化后要求重新预演。
-hash 是不可变计划一致性检查，不是访问控制凭证或 cryptographic user identity；计划绑定当前五分钟窗口结束时间，到期重新预演。没有服务器级幂等键，也不伪装 exactly-once。已授权的 Agent 可以在同一任务自动预演、核对、提交，不引入每次人工确认流程。适配层拒绝关闭调用者继承的 workspace/tab/pane，不扩张为 group close。前置查询与执行非原子，不能替代服务器端并发条件写入，执行后仍须核对。
+RESOURCE ACTION 接受显式 --input JSON / --file PATH，- 为显式 stdin；最大 64 KiB、拒绝未知字段和无效值。输出为单个版本化 JSON/JSONL 终结 envelope；stdout 不混诊断。list 默认 20 最大 100，本地 offset/投影非服务器分页；read 有行数与字节/字符边界。timeout 有界，不构造任意 shell/raw argv 入口。
 
-## 输出
+读直接执行，写默认预演。提交要求相同 plan_hash，绑定参数、binary/hash、actor、cwd、环境摘要、socket/session、目标快照与有效窗口。hash 是一致性检查，不是权限凭证或服务器事务；已获授权任务可自动核对提交。不得自动重试写入；dispatch 后超时、取消、输出超限为 outcome unknown，后置校验失败为 committed/unknown，提供核对建议。
 
-成功 `{schema_version,ok:true,type:result,data,meta:{request_id,duration_ms,...}}`；失败同层 error `{code,message,retryable,outcome,details,next_actions}`。JSONL 仅终结 envelope，无进度事件。quiet 不去掉终结结果。输出 encode 非 ASCII，保持 UTF-8 JSON 无 ANSI 控制字节；字符串中的终端控制被清理。
-list 输出 items/pagination{offset,limit,returned,total,truncated,next_offset,consistency}；offset 是本次完整原生列表的本地切片，不是稳定 snapshot cursor。projection 仅对 items 字段应用，保留标识字段并声明。read 返回 text、line_limit、字符截断状态，不能截断 JSON 字节。
+布局 create/split 使用 no-focus 并 get 确认对象；close 用 list 确认消失且保护当前调用者对象。agent rename 后 get 验证实际名称并返回 confirmed=true。prompt 的 submitted 与 wait 的 settled 不等于任务完成；必须读取真实结果。tool_version 为 2.0.0，schema_version 独立演进。完整精选字段/输出/错误详见 references/agent-cli-contract.md。
 
-## 退出与 outcome
+## 原生协议与订阅
 
-0 success；1 internal/backend malformed；2 invalid input；3 dependency/environment/resource；4 timeout/connectivity；5 state/plan/conflict；130 interrupt。官方 error.code 另保留，不通过英文/中文 message 猜业务状态。
-read timeout 不影响业务状态；write timeout/output-limit/取消在 dispatch 后均 outcome unknown，停止本次 CLI 子进程但不停止已创建的 Herdr pane/Agent，返回 reconciliation。
-成功写入但后续验证失败=committed 或 unknown，绝不把它报告为 not_started。start 被审批阻挡可能已启动进程，保留 name/pane；prompt 已提交不等于完成。
+TUI request schema 当前含 102 方法。events.subscribe 请求 subscriptions 数组，events.wait 请求 match_event 与可选 timeout_ms，不能编造 filters/events 参数。完整 API 的具体命令语法由 herdr_api.py --help/schema 提供，不在开发文档再建立不同契约。
 
-## 后端与输出界限
+Core schema 为 OpenRPC 文档，含参数/结果/错误。hc connect 提供官方 JSON-RPC 连接，hello 协商，terminal.attach 需 framed 传输。doc.set 按版本条件写，冲突不自动覆盖。events.subscribe 使用 Core 自己的过滤字段，快照/heartbeat/missed 重同步与 TUI 分开。文件/短程序/持久程序按原生 CLI；无需自制 Core wrapper。
 
-只从 HERDR_BIN_PATH 或 PATH 找 herdr，解析 realpath，检查 exe 名称及版本 0.9.5，计划包含二进制文件 SHA-256。不是对恶意本机用户的签名信任边界。读取 stdout/stderr 各有硬上限（默认 1 MiB），后台线程有界排水，超限终止本次 CLI 子进程并报告 structured error；不返回部分 JSON 当成功。
-环境继承是 Herdr/Agent 本机兼容所需，计划仅保存环境摘要不保存明文。适配工具不是沙箱，不隔离现有 Herdr server/Agent 的 CPU、网络、文件或权限；不声称限制已启动 Agent 的后续行为。
+App do 接受 key/value 或 JSON object，目标 ID 必须是字符串，未知参数失败。commands 可离线读取，ls/status/shot 需要运行窗口，裸启动会打开窗口。Core 后台任务默认隐藏；App 新建对象会改变用户视图。
 
-## 验证器
+## mod 维护
 
-workspace/tab create：解析官方 ID，get 确认；close：先 get 确认目标、提交后对应 list 确认不存在；agent start：get 确认 name/kind/pane 与就绪；prompt：仅确认 submitted，提供状态/输出命令；wait：返回 settled 及原始生命周期，不能报告业务完成。
+解析 HERDR_APP_HOME（默认 ~/.config/herdr-app），读取生成的 AGENTS.md、herdr.d.ts、gpui-kit.d.ts，不编辑这些文件。内置 mod/layout 先 clone。View 回调各自使用 cx，使用主题色、原生动画与 cx.spawn/timer；保存热重载，错误时保留旧版，需检查 status。close 清理预算 250 ms，不能在隐藏时误做销毁。
 
-## 未纳入 v1 的增强项
+修改 mod 后 check、status、shot 并查看图像；check 不覆盖延后渲染/全部交互。当前文档升级不修改或验证用户 mod，不声称视觉通过。
 
-原始 Windows pipe 客户端、长期事件订阅、自动审批、exactly-once 消息、跨机器分发、Agent 内容自动判分、系统 PATH 安装和独立无 Python 二进制。本机有 Python 且已复用，便携技能入口足以交付本次目标，其他平台不作实测声明。
+## 证据与兼容
+
+静态发现只证明目录；运行时查询、fixture、实际业务和视觉验证分别记录。hc server status 不启动 Core，hc machine ls 可按需启动。Core update 计划重启保留终端；stop 可能结束所有程序。TUI 的服务停止、恢复、配置与 Core/App 不互换。当前维护不读取用户会话正文、凭据或运行任意真实任务。

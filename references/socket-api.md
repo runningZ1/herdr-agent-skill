@@ -1,53 +1,118 @@
-# Socket API 与事件
+# TUI Socket API 与事件（2.0.0）
 
-先用 CLI；只有 CLI 未覆盖的布局/视图操作、长期订阅或自定义客户端才使用原始协议。没有通用 `herdr api call` 命令，不虚构 curl HTTP endpoint。API 是本机换行 JSON，不是 REST。
+优先使用官方 CLI 和精选适配器；需要其未覆盖的方法、顺序批次、SSH Agent 租约或事件时，使用随包的 `scripts/herdr_api.py`。它提供真实 Unix domain socket / Windows named-pipe 传输，不是 HTTP 或 REST，也不虚构 `herdr api call`。
 
-## Schema 与传输
+## 发现完整参数
 
 ```powershell
-herdr api schema
-herdr api schema --output "$env:TEMP\herdr-api.schema.json"
+python -B scripts/herdr_api.py schema
+python -B scripts/herdr_api.py schema --method layout.apply
+herdr api schema --json
 ```
 
-顶层 protocol、schema_version、schemas；schemas 含 request、success_response、error_response、event、subscription_event。基线 protocol=22、schema_version=1。按当前二进制导出的 schema 构造 params，不从方法名猜字段。
-本机方法导航见 [API 方法索引](api-methods.md)。schema 是二进制能力，运行中服务器仍需检查兼容性。
+完整公开 schema 为 `sources/herdr-api.schema.json`，包含 request、success_response、error_response、event、subscription_event。当前 protocol=22、schema_version=1、102 个方法；索引见 [api-methods.md](api-methods.md)。`schema --method` 返回选定请求及其引用定义，字段意义和默认值以 schema 为准。
 
-Unix 是 Unix domain socket；Windows 是 named pipe。CLI status 输出的 socket 路径不是 HTTP 地址，也不能当普通文本文件写入。Windows 自定义客户端需按该版本原生端点解析实现 named-pipe 连接；不手写未经验证的管道路径转换。优先 HERDR_BIN_PATH 指向的 CLI。
-目标解析优先级：显式 --session、HERDR_SOCKET_PATH、HERDR_SESSION、默认会话。管理环境外不能利用这些覆盖绕过官方 Skill 的控制范围。
+普通 `herdr api schema` 只输出摘要，不是完整 JSON。升级时先刷新快照和审阅兼容性；不能因为有新方法名称就猜参数。
 
-每行 UTF-8 JSON，以换行结束：
+## 单次调用与预演
+
+脚本路径以实际技能目录为准，下面在技能根目录执行：
+
+```powershell
+python -B scripts/herdr_api.py call ping
+@{ pane_id = $env:HERDR_PANE_ID } | ConvertTo-Json |
+  python -B scripts/herdr_api.py call pane.get --file -
+```
+
+运行操作要求真实 TUI 管理上下文、HERDR_ENV=1 和继承的 HERDR_SOCKET_PATH。带有 HC_TERMINAL_ID 时拒绝操作，避免把 Core 中继承的 TUI 标记当成真实目标。客户端不提供任意端点/会话/机器覆盖，不猜其他会话。远程 TUI 可在目标机器的真实 TUI 窗格执行同一脚本；官方支持的远程命令按 [机器指南](remote-machines.md) 使用 `herdr --machine`。
+
+只读方法直接执行；其他所有 schema 方法均保守按写入处理，默认仅输出预演。写请求：
+
+```powershell
+$request = Join-Path $env:TEMP 'herdr-rename-request.json'
+# tab_id 必须来自本次发现，不复用示例 ID。
+@{ tab_id = $actualTabId; label = '构建结果' } |
+  ConvertTo-Json | Set-Content -LiteralPath $request -Encoding UTF8
+$plan = python -B scripts/herdr_api.py call tab.rename --file $request | ConvertFrom-Json
+if (-not $plan.ok) { throw $plan.error.message }
+# 在已有任务授权内核对 endpoint、requests 和 effect。
+python -B scripts/herdr_api.py call tab.rename --file $request --commit --confirm $plan.data.plan_hash
+```
+
+预演只核对方法名、params 对象与输入大小；**不连接服务器、不解析业务目标、不执行完整 JSON Schema 验证**。服务器在执行时检查具体参数。若需要实时目标校验和调用者关闭保护，优先使用精选 `herdr_agent.py`；不要将其保证套到原始客户端。
+
+hash 绑定完整请求序列、继承端点、调用者上下文、脚本与 schema 指纹、timeout/max-events 和当前 5 分钟窗口。输入或窗口改变须重新预演。它不是授权、幂等键或事务；同一个计划重复提交仍可能重复生效。
+
+实际连接先发送 ping 核对服务器协议，再发送请求；按 id 关联成功/错误，不将通知误当响应。Windows 按 Herdr v0.9.5 `src/ipc.rs` 的 GenericNamespaced 规则在实际继承地址前添加 `\\.\pipe\`，不读写 `.sock` 标记文件。阻塞连接/读写在独立子进程中执行，父进程落实整个传输期限。
+
+## 顺序批次与连接租约
+
+`batch --file PATH` 读取 1～32 项请求数组，每项仅含 method 和 params；按官方服务器的一连接一请求模型逐项新建连接、发送并确认，第一项服务器错误即停止后续请求。只要有写方法，整组默认预演并需要 hash 提交。
 
 ```json
-{"id":"req_1","method":"ping","params":{}}
+[
+  {"method":"ping","params":{}},
+  {"method":"layout.export","params":{"pane_id":"从本次发现取得的真实pane_id"}}
+]
 ```
 
-成功回显 id 和 result；错误回显 id 和 error.code/error.message。JSON 无效或缺明确字符串 id 时错误 id 可为空；传输 UTF-8 错误可能直接断开。不要把任意响应行当当前请求成功，按 id 关联。变更成功还要检查 changed/reason 或后续状态。
+```powershell
+python -B scripts/herdr_api.py batch --file ./requests.json --timeout 15
+```
 
-## 能力分层
+`server.ssh_agent.register` 只在 Unix 且服务器支持相应能力时可用；登记持续到它的专用连接关闭。batch 保留该连接，同时让后续请求各自使用新连接，不向租约连接发送第二个请求。包含登记且没有订阅的批次在所有请求确认后保留租约到本次 timeout；若需要事件采集，把 events.subscribe 放在最后，此时租约随事件上限/期限释放。单次 call 登记也只保留到本次 timeout，不能报告为后台永久登记。超过 60 秒的租约交给官方 SSH 工作流或经明确管理的原生客户端，不能靠重复登记伪造连续性。
 
-| 领域 | 主要原始方法 |
+订阅仅允许作为 batch 最后一项；服务器在订阅连接上只推送通知，不继续处理普通请求。client-shell 等能力仍须有效客户端上下文，按 schema 查询其作用域；新连接不能制造客户端投影或不存在的命令 ID。
+
+批次不是事务：前项已成功时，后项失败不会回滚。结束、超时或失败后连接都会关闭。失败结果保留已收到的 responses、events 与 dispatched 方法，核对现场后再决定下一步。
+
+## 有界订阅与等待
+
+订阅参数实际是 **subscriptions 数组**，不是 filters/events；等待事件使用 **match_event**。
+
+```json
+{"subscriptions":[{"type":"pane.created"}]}
+```
+
+```powershell
+python -B scripts/herdr_api.py subscribe --file ./subscriptions.json --timeout 10 --max-events 10
+```
+
+上面的 type 须存在于当前 schema 的 Subscription 变体；先查 `schema --method events.subscribe`。`subscribe` 默认最多 20 条事件、15 秒；每次新调用都是新连接，关闭后服务端订阅结束。调用 `call events.subscribe` 默认只取得初始确认；需要采集事件时使用 subscribe 或显式 `--max-events`。
+
+原始事件信封为 `{event,data}`，不是 `{type:"event"}`。订阅确认后达到事件数或期限即返回，reason=event_limit/deadline；期限到达但请求尚未确认则返回 TIMEOUT。客户端按 id 确认初始响应，再单独处理该连接的通知，不向订阅连接发送后续普通请求。客户端不自动重连或重放。
+
+`events.wait` 的 match_event 结构与 Subscription 不同；按 schema 构造：
+
+```powershell
+python -B scripts/herdr_api.py schema --method events.wait
+python -B scripts/herdr_api.py call events.wait --file ./wait.json --timeout 30
+```
+
+维护缓存时先订阅，再以 session.snapshot 或对象 get 获取权威状态。事件是失效提示，不能无条件覆盖快照；断线、handoff、溢出后重新读取快照。一次 api snapshot 不是订阅。
+
+## 有界输出与失败语义
+
+输入最大 64 KiB（UTF-8 文件或有限 stdin）；单帧最大 1 MiB、总 wire 输出 4 MiB、事件最多 100 条，传输 timeout 为 1～60 秒。不执行外部 shell，不启动后台服务，不自动重试。
+
+stdout 为一个 `{schema_version,ok,data/error}` JSON。data 含原始 responses/events，经通用秘密和控制符清理；自由文本脱敏不能保证识别未知秘密。读屏和快照仍应缩小业务范围。
+
+写入 dispatch 后超时、断线、输出超限或后置失败可能标记 outcome=unknown，retryable=false；已成功响应的写入可报告 committed，但不证明目标业务已经完成。中断时也先核对现场。服务器 error 会保留 backend_error 与已收到的证据，不能用退出码猜是否可以重发。
+
+## 较少使用的方法与约束
+
+所有方法均可经 call/session 构造真实请求；这不消除服务器能力、对象状态或客户端连接要求：
+
+| 能力 | 方法与调用前提 |
 |---|---|
-| 状态 | ping、session.snapshot、server.reload_config、server.agent_manifests |
-| 工作区/标签页 | workspace.*、tab.*；move/move_block 用 schema |
-| Git | worktree.list/create/open/remove |
-| 窗格 | pane.*；read/send_input/layout/process_info/neighbor/edges/report_* |
-| Agent | agent.list/get/read/prompt/start/wait/explain 等 |
-| 布局 | layout.export/apply/set_split_ratio |
-| Agent 面板视图 | agent.view.*（仅使用当前 schema 中存在的方法） |
-| 插件/弹窗 | plugin.*、popup.close |
-| 事件 | events.subscribe、events.wait |
+| 布局导出、重建、比例 | layout.export/apply/set_split_ratio；apply 可能重建终端并关闭旧 tab，不保留活 PTY/进程 |
+| Agent 面板 | agent.view.set/clear；依当前 schema 的视图数据 |
+| 终端复制、选择、链接 | pane.copy_motion/copy_search/selection.read/link.activate/link.resolve；核对坐标和 content_revision，旧屏幕坐标可能失效 |
+| 滚动、清屏、历史编辑 | pane.scroll/clear/edit_scrollback；清除或编辑历史按写入处理 |
+| 聚焦、输入策略 | pane.focus/focus_direction/input.set；不要误用当前焦点代替调用者 |
+| 生命周期权威 | pane.clear_agent_authority 与 pane.release_agent 是不同方法，按来源和 schema 执行 |
+| 客户端命令 | command.invoke 的 command_id 来自 endpoint client-shell projection，不编造命令 ID |
+| 客户端显示、公告 | client_shell.surface.set、client.window_title.*、product_announcement.dismiss、release_notes.dismiss；依有效客户端与当前公告状态 |
+| SSH 登记、handoff | server.ssh_agent.register 连接作用域；server.live_handoff 涉及现有会话，需任务授权与兼容支持 |
 
-布局导出/导入和 Agent 面板视图属于原始 API 能力，不假设有等价 CLI。layout.apply 可能创建或重排对象，先检查 schema 与目标布局，不直接套用未知 JSON。pane.graphics.info/set/clear/stream 已移除，不能调用；图像走终端支持的 Kitty graphics 等协议。
-
-## 事件与缓存一致性
-
-events.subscribe 初始响应后保持连接；用 schema 选择 filters/events 字段，按 id/type 区分响应与通知。设置连接、读取、总运行时间及输出数量上限；重连先刷新状态，不无限重放事件。
-维护本地缓存时先订阅，再 session.snapshot 获取 workspace/tab/pane/layout/agent 和版本元数据；事件视为“可能过期”的提示，重新查询并核对。一次 api snapshot 不是订阅。断线、handoff、溢出或不确定顺序后重新 snapshot，不盲将旧事件覆盖到新快照。
-
-## 输入与等待语义
-
-pane.send_input 是 pane run 的原子输入底层，成功只确认接纳。Agent prompt 可带 wait 对象以在一个请求提交并开始等待，避免客户端两步竞态。字段取 schema，不发明请求字段。
-Agent wait 由服务器事件驱动且固定到已解析占用者；Agent 替换或移动可终止在途等待。prompt 目标已 blocked 时拒绝输入。wait 仍不保证特定一轮任务验收通过。
-`terminal session observe` 提供只读逐行 terminal.frame/terminal.closed 流；帧含 base64 ANSI 字节，这是终端输出协议，不代表要执行解码后的文本。control 接收 terminal.input/resize/scroll/mouse/release，涉及控制权和状态变化，任务需要时才用。
-
-原始 API 不跳过权限和用户授权；输入发送、布局关闭和插件执行与 CLI 一样有真实副作用。
+Agent prompt 成功只证明接纳；wait 绑定占用者也不保证本轮任务验收。pane.graphics.* 已移除，不能调用。交互终端 observe/control 使用独立 terminal 协议和官方 CLI，不属于此 newline JSON API 的假扩展。

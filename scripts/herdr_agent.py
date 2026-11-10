@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 
-VERSION = '1.0.1'
+VERSION = '2.0.0'
 SCHEMA = '1.0'
 MAX_BYTES = 1024 * 1024
 MAX_INPUT_BYTES = 65536
@@ -105,6 +105,13 @@ def clean(value):
     value = re.sub(r'(?i)(password|api[_-]?key|access[_-]?token|secret|authorization|cookie)(\s*[=:]\s*)[^\s,;]+', r'\1\2[REDACTED]', value)
     value = re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----', '[REDACTED PRIVATE KEY]', value, flags=re.S)
     return ''.join(c for c in value if c in '\n\t' or (ord(c)>=32 and not 0x7f<=ord(c)<=0x9f and not 0x200b<=ord(c)<=0x200f and not 0x202a<=ord(c)<=0x202e and not 0x2066<=ord(c)<=0x2069))
+
+
+def require_tui():
+    if os.environ.get('HC_TERMINAL_ID'):
+        raise Failure('OUTSIDE_HERDR','Core terminals must use hc; inherited HERDR_* markers are not TUI context')
+    if os.environ.get('HERDR_ENV')!='1':
+        raise Failure('OUTSIDE_HERDR','Runtime control requires a real Herdr TUI managed pane')
 
 
 class Backend:
@@ -467,7 +474,7 @@ def execute(args):
     if args.resource=='errors': return schema()['errors'],{}
     if args.resource=='version': return {'tool':'herdr-agent','tool_version':VERSION,'schema_version':SCHEMA,'tested_backend':'herdr 0.9.5'},{}
     if args.resource=='doctor':
-        if os.environ.get('HERDR_ENV')!='1': raise Failure('OUTSIDE_HERDR','Runtime control requires HERDR_ENV=1')
+        require_tui()
         backend=Backend(args.timeout)
         return {'backend':backend.version,'binary':str(backend.binary),'status':backend.raw(['status']),'config':backend.raw(['config','check']),'caller':backend.call(['pane','current','--current'])},{}
     name=args.resource+'.'+str(args.action)
@@ -480,7 +487,7 @@ def execute(args):
     inputs=validate_input(op,load_input(args))
     if args.commit and not args.confirm: raise Failure('PLAN_MISMATCH','Commit requires --confirm hash from dry-run')
     if args.confirm and not args.commit: raise Failure('INVALID_INPUT','--confirm requires --commit')
-    if os.environ.get('HERDR_ENV')!='1': raise Failure('OUTSIDE_HERDR','Runtime control requires HERDR_ENV=1')
+    require_tui()
     backend=Backend(args.timeout)
     state=preflight(backend,name,inputs)
     argv=argv_for(name,op,inputs,args.timeout)

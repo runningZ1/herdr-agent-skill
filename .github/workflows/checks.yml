@@ -9,5 +9,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -B tests/test_adapter.py
+      - run: python -B tests/test_socket_api.py
+      - run: python -B tests/test_auto_name.py
+      - run: python -B tests/test_tools.py
       - run: python -B tools/validate.py
       - run: python -B tools/build.py --verify
