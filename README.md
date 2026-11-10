@@ -43,6 +43,27 @@ python -B scripts/herdr_agent.py workspace create --help
 
 详细说明：[适配契约](references/agent-cli-contract.md) · [覆盖矩阵](references/coverage-matrix.md) · [操作工作流](references/workflows.md) · [来源与验证边界](references/sources-validation.md)。
 
+## 对话窗口自动命名（Herdr TUI）
+
+可选插件 `plugins/auto-name/` 使用官方事件钩子命名默认序号标签页，不启动额外常驻服务。要求 Python 3.10+ 和 Herdr TUI 0.9.5；已在 Windows 验证。
+
+```powershell
+herdr plugin link ./plugins/auto-name
+herdr plugin action invoke local.auto-name.sync
+```
+
+插件在会话启动、新建标签页/窗格、Agent 检测/状态变化和窗格聚焦时自动处理。优先采用 Agent 上报的对话标题，去掉 OMP 状态旋转符和标题前缀；Claude 只有通用标题时，从本机对应会话的首段读取第一条用户消息。没有对话主题时先用“Agent · 项目目录”，得到主题后更新。标题最多 36 字符，读取和命名均不调用外部模型。
+
+只修改空名称、纯数字名称，以及插件自己生成且未被手动修改的名称。已有自定义名称保持不变；手动改名后停止跟随，改回纯数字可恢复自动命名。多窗格标签页优先用首个 Agent 的主题。插件状态保存在 Herdr 提供的插件状态目录，并按会话 socket 隔离；不直接修改 `session.json`。命名前会重新核对标签，API 查询与重命名之间仍存在极短的并发窗口。
+
+```powershell
+python -B tests/test_auto_name.py
+herdr plugin log list --plugin local.auto-name --limit 10
+herdr plugin disable local.auto-name
+```
+
+禁用只停止后续自动命名，已经设置的名称保留。本插件不适用于 Herdr App / `hc`。
+
 ## 测试与构建
 
 在仓库根目录执行：

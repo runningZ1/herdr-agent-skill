@@ -1,0 +1,39 @@
+id = "local.auto-name"
+name = "Automatic conversation names"
+version = "1.0.0"
+min_herdr_version = "0.9.5"
+description = "Name numeric tabs from agent conversation titles; preserve custom names."
+platforms = ["windows", "linux", "macos"]
+
+[[startup]]
+command = ["python", "-B", "main.py"]
+
+[[actions]]
+id = "sync"
+title = "Name default conversation tabs"
+contexts = ["workspace"]
+command = ["python", "-B", "main.py"]
+
+[[events]]
+on = "tab.created"
+command = ["python", "-B", "main.py"]
+
+[[events]]
+on = "tab.renamed"
+command = ["python", "-B", "main.py"]
+
+[[events]]
+on = "pane.created"
+command = ["python", "-B", "main.py"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["python", "-B", "main.py"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["python", "-B", "main.py"]
+
+[[events]]
+on = "pane.focused"
+command = ["python", "-B", "main.py"]
